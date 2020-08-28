@@ -298,9 +298,14 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 			switch header.Typeflag {
 			case tar.TypeDir:
 				if err := os.MkdirAll(target, 0755); err != nil {
-					return fmt.Errorf("failed to make directory %s: %w", target, err)
+					return fmt.Errorf("failed to make directory: %w", err)
 				}
 			case tar.TypeReg:
+				// Create the parent directory in case it does not exist...
+				if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+					return fmt.Errorf("failed to make parent directory: %w", err)
+				}
+
 				f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
 				if err != nil {
 					return fmt.Errorf("failed to open: %w", err)
