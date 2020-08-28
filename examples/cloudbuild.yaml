@@ -1,0 +1,45 @@
+# Copyright 2020 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+steps:
+- id: 'restore-cache'
+  name: 'us-docker.pkg.dev/vargolabs/gcs-cacher/gcs-cacher:0.1'
+  args:
+  - '-bucket=${PROJECT_ID}-cloudbuild-cache'
+  - '-restore=go-$(gcs-cacher -hash go.sum)'
+  - '-restore=go-'
+  - '-dir=/go/pkg'
+  volumes:
+  - name: 'go-pkg'
+    path: '/go/pkg'
+
+- id: 'build'
+  name: 'TODO'
+  args:
+  # Your args here
+  - go
+  - build
+  volumes:
+  - name: 'go-pkg'
+    path: '/go/pkg'
+
+- id: 'save-cache'
+  name: 'us-docker.pkg.dev/vargolabs/gcs-cacher/gcs-cacher:0.1'
+  args:
+  - '-bucket=${PROJECT_ID}-cloudbuild-cache'
+  - '-cache=go-$(gcs-cacher -hash go.sum)'
+  - '-dir=/go/pkg'
+  volumes:
+  - name: 'go-pkg'
+    path: '/go/pkg'
