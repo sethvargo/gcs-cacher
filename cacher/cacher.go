@@ -6,7 +6,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/sha1"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+	"golang.org/x/crypto/blake2b"
 	"google.golang.org/api/option"
 )
 
@@ -340,7 +340,10 @@ func HashGlob(pattern string) (string, error) {
 
 // HashFiles hashes the list of file and returns the hex-encoded SHA256.
 func HashFiles(files []string) (string, error) {
-	h := sha1.New()
+	h, err := blake2b.New(16, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create hash: %w", err)
+	}
 
 	for _, name := range files {
 		f, err := os.Open(name)

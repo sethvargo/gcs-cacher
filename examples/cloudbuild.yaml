@@ -17,7 +17,7 @@ steps:
   name: 'us-docker.pkg.dev/vargolabs/gcs-cacher/gcs-cacher:0.1'
   args:
   - '-bucket=${PROJECT_ID}-cloudbuild-cache'
-  - '-restore=go-$(gcs-cacher -hash go.sum)'
+  - '-restore=go-{{ hashGlob "go.sum" }}'
   - '-restore=go-'
   - '-dir=/go/pkg'
   - '-allow-failure'
@@ -39,7 +39,7 @@ steps:
   name: 'us-docker.pkg.dev/vargolabs/gcs-cacher/gcs-cacher:0.1'
   args:
   - '-bucket=${PROJECT_ID}-cloudbuild-cache'
-  - '-cache=go-$(gcs-cacher -hash go.sum)'
+  - '-cache=go-{{ hashGlob "go.sum" }}'
   - '-dir=/go/pkg'
   volumes:
   - name: 'go-pkg'

@@ -55,13 +55,13 @@ and restore up the chain. For example:
 ```shell
 gcs-cacher \
   -bucket "my-bucket" \
-  -cache "ruby-$(gcs-cacher -hash Gemfile.lock)"
+  -cache "ruby-{{ hashGlob "Gemfile.lock" }}"
 ```
 
 ```shell
 gcs-cacher \
   -bucket "my-bucket" \
-  -restore "ruby-$(gcs-cacher -hash Gemfile.lock)"
+  -restore "ruby-{{ hashGlob "Gemfile.lock" }}"
   -restore "ruby-"
 ```
 

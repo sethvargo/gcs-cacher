@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
+	"text/template"
 
 	"github.com/sethvargo/gcs-cacher/cacher"
 )
@@ -61,7 +63,13 @@ func main() {
 
 	switch {
 	case cache != "":
-		if err := saveCache(bucket, dir, cache); err != nil {
+		parsed, err := parseTemplate(cache)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			os.Exit(1)
+		}
+
+		if err := saveCache(bucket, dir, parsed); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			if allowFailure {
 				os.Exit(0)
@@ -70,7 +78,17 @@ func main() {
 			}
 		}
 	case restore != nil:
-		if err := restoreCache(bucket, dir, restore); err != nil {
+		keys := make([]string, len(restore))
+		for i, key := range restore {
+			parsed, err := parseTemplate(key)
+			if err != nil {
+				fmt.Fprintf(stderr, "%s\n", err)
+				os.Exit(1)
+			}
+			keys[i] = parsed
+		}
+
+		if err := restoreCache(bucket, dir, keys); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			if allowFailure {
 				os.Exit(0)
@@ -78,12 +96,6 @@ func main() {
 				os.Exit(1)
 			}
 		}
-	case hash != "":
-		dig, err := cacher.HashGlob(hash)
-		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-		}
-		fmt.Fprintf(stdout, "%s", dig)
 	default:
 		fmt.Fprintf(stderr, "missing command operation!\n")
 		os.Exit(1)
@@ -116,6 +128,28 @@ func restoreCache(bucket, dir string, keys []string) error {
 		Dir:    dir,
 		Keys:   keys,
 	})
+}
+
+func parseTemplate(key string) (string, error) {
+	tmpl, err := template.New("").
+		Option("missingkey=error").
+		Funcs(templateFuncs).
+		Parse(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var b bytes.Buffer
+	if err := tmpl.Execute(&b, nil); err != nil {
+		return "", fmt.Errorf("failed to process template: %w", err)
+	}
+	return b.String(), nil
+}
+
+var templateFuncs = template.FuncMap{
+	"hashGlob": func(key string) (string, error) {
+		return cacher.HashGlob(key)
+	},
 }
 
 type stringSliceFlag []string
