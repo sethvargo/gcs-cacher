@@ -20,6 +20,7 @@ steps:
   - '-restore=go-$(gcs-cacher -hash go.sum)'
   - '-restore=go-'
   - '-dir=/go/pkg'
+  - '-allow-failure'
   volumes:
   - name: 'go-pkg'
     path: '/go/pkg'

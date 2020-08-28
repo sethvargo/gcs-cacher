@@ -23,6 +23,9 @@ var (
 	// restore is the list of restore keys to use to restore.
 	restore stringSliceFlag
 
+	// allowFailure allows a command to fail.
+	allowFailure bool
+
 	// dir is the directory on disk to cache or the destination in which to
 	// restore.
 	dir string
@@ -37,6 +40,7 @@ func init() {
 
 	flag.StringVar(&cache, "cache", "", "Key with which to cache.")
 	flag.Var(&restore, "restore", "Keys to search to restore (can use multiple times).")
+	flag.BoolVar(&allowFailure, "allow-failure", false, "Allow the command to fail.")
 	flag.StringVar(&hash, "hash", "", "Glob pattern to hash.")
 }
 
@@ -59,12 +63,20 @@ func main() {
 	case cache != "":
 		if err := saveCache(bucket, dir, cache); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
-			os.Exit(1)
+			if allowFailure {
+				os.Exit(0)
+			} else {
+				os.Exit(1)
+			}
 		}
 	case restore != nil:
 		if err := restoreCache(bucket, dir, restore); err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
-			os.Exit(1)
+			if allowFailure {
+				os.Exit(0)
+			} else {
+				os.Exit(1)
+			}
 		}
 	case hash != "":
 		dig, err := cacher.HashGlob(hash)
