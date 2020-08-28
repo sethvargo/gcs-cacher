@@ -77,6 +77,9 @@ func main() {
 				os.Exit(1)
 			}
 		}
+
+		fmt.Fprintf(stdout, "finished saving cache\n")
+		os.Exit(0)
 	case restore != nil:
 		keys := make([]string, len(restore))
 		for i, key := range restore {
@@ -96,6 +99,9 @@ func main() {
 				os.Exit(1)
 			}
 		}
+
+		fmt.Fprintf(stdout, "finished restoring cache\n")
+		os.Exit(0)
 	default:
 		fmt.Fprintf(stderr, "missing command operation!\n")
 		os.Exit(1)

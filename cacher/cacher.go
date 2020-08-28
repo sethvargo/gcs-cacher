@@ -79,6 +79,7 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 
 	// Create the storage writer
 	gcsw := c.client.Bucket(bucket).Object(key).NewWriter(ctx)
+	gcsw.ChunkSize = 128_000_000
 	gcsw.ObjectAttrs.ContentType = contentType
 	gcsw.ObjectAttrs.CacheControl = cacheControl
 	defer func() {
