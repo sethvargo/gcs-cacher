@@ -117,7 +117,7 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 	gcsw.ObjectAttrs.ContentType = contentType
 	gcsw.ObjectAttrs.CacheControl = cacheControl
 	gcsw.ProgressFunc = func(soFar int64) {
-		c.log("uploaded %d bytes", soFar)
+		fmt.Printf("uploaded %d bytes", soFar)
 	}
 
 	// Create the gzip writer
