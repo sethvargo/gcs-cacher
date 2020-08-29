@@ -60,7 +60,9 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n\n", err)
-		os.Exit(1)
+		if !allowFailure {
+			os.Exit(1)
+		}
 	}
 }
 
