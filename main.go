@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/sethvargo/gcs-cacher/cacher"
+	"github.com/sethvargo/go-signalcontext"
 )
 
 var (
@@ -34,6 +35,9 @@ var (
 
 	// hash is the glob pattern to hash.
 	hash string
+
+	// debug enables debug logging.
+	debug bool
 )
 
 func init() {
@@ -44,102 +48,88 @@ func init() {
 	flag.Var(&restore, "restore", "Keys to search to restore (can use multiple times).")
 	flag.BoolVar(&allowFailure, "allow-failure", false, "Allow the command to fail.")
 	flag.StringVar(&hash, "hash", "", "Glob pattern to hash.")
+
+	flag.BoolVar(&debug, "debug", false, "Print verbose debug logs.")
 }
 
 func main() {
+	ctx, done := signalcontext.OnInterrupt()
+
+	err := realMain(ctx)
+	done()
+
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n\n", err)
+		os.Exit(1)
+	}
+}
+
+func realMain(ctx context.Context) error {
 	args := os.Args
 	for _, arg := range args {
 		if arg == "-h" || arg == "--help" || arg == "help" {
 			flag.PrintDefaults()
-			os.Exit(0)
+			return nil
 		}
 	}
 
 	flag.Parse()
 	if len(flag.Args()) > 0 {
-		fmt.Fprintf(stderr, "no arguments expected\n")
-		os.Exit(1)
+		return fmt.Errorf("no arguments expected")
 	}
+
+	c, err := cacher.New(ctx)
+	if err != nil {
+		return err
+	}
+	c.Debug(debug)
 
 	switch {
 	case cache != "":
-		parsed, err := parseTemplate(cache)
+		parsed, err := parseTemplate(c, cache)
 		if err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			os.Exit(1)
+			return err
 		}
 
-		if err := saveCache(bucket, dir, parsed); err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			if allowFailure {
-				os.Exit(0)
-			} else {
-				os.Exit(1)
-			}
+		if err := c.Save(ctx, &cacher.SaveRequest{
+			Bucket: bucket,
+			Dir:    dir,
+			Key:    parsed,
+		}); err != nil {
+			return err
 		}
 
 		fmt.Fprintf(stdout, "finished saving cache\n")
-		os.Exit(0)
+		return nil
 	case restore != nil:
 		keys := make([]string, len(restore))
 		for i, key := range restore {
-			parsed, err := parseTemplate(key)
+			parsed, err := parseTemplate(c, key)
 			if err != nil {
-				fmt.Fprintf(stderr, "%s\n", err)
-				os.Exit(1)
+				return err
 			}
 			keys[i] = parsed
 		}
 
-		if err := restoreCache(bucket, dir, keys); err != nil {
-			fmt.Fprintf(stderr, "%s\n", err)
-			if allowFailure {
-				os.Exit(0)
-			} else {
-				os.Exit(1)
-			}
+		if err := c.Restore(ctx, &cacher.RestoreRequest{
+			Bucket: bucket,
+			Dir:    dir,
+			Keys:   keys,
+		}); err != nil {
+			return err
 		}
 
 		fmt.Fprintf(stdout, "finished restoring cache\n")
-		os.Exit(0)
+		return nil
 	default:
-		fmt.Fprintf(stderr, "missing command operation!\n")
-		os.Exit(1)
+		return fmt.Errorf("missing command operation")
 	}
 }
 
-func saveCache(bucket, dir, key string) error {
-	ctx := context.Background()
-	c, err := cacher.New(ctx)
-	if err != nil {
-		return err
-	}
-
-	return c.Save(ctx, &cacher.SaveRequest{
-		Bucket: bucket,
-		Dir:    dir,
-		Key:    key,
-	})
-}
-
-func restoreCache(bucket, dir string, keys []string) error {
-	ctx := context.Background()
-	c, err := cacher.New(ctx)
-	if err != nil {
-		return err
-	}
-
-	return c.Restore(ctx, &cacher.RestoreRequest{
-		Bucket: bucket,
-		Dir:    dir,
-		Keys:   keys,
-	})
-}
-
-func parseTemplate(key string) (string, error) {
+func parseTemplate(c *cacher.Cacher, key string) (string, error) {
 	tmpl, err := template.New("").
 		Option("missingkey=error").
-		Funcs(templateFuncs).
+		Funcs(templateFuncs(c)).
 		Parse(key)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
@@ -152,10 +142,12 @@ func parseTemplate(key string) (string, error) {
 	return b.String(), nil
 }
 
-var templateFuncs = template.FuncMap{
-	"hashGlob": func(key string) (string, error) {
-		return cacher.HashGlob(key)
-	},
+func templateFuncs(c *cacher.Cacher) template.FuncMap {
+	return template.FuncMap{
+		"hashGlob": func(key string) (string, error) {
+			return c.HashGlob(key)
+		},
+	}
 }
 
 type stringSliceFlag []string

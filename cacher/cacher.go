@@ -6,14 +6,18 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
+	"hash"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"cloud.google.com/go/storage"
 	"golang.org/x/crypto/blake2b"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -25,6 +29,8 @@ const (
 // Cacher is responsible for saving and restoring caches.
 type Cacher struct {
 	client *storage.Client
+
+	debug bool
 }
 
 // New creates a new cacher capable of saving and restoring the cache.
@@ -38,6 +44,11 @@ func New(ctx context.Context) (*Cacher, error) {
 	return &Cacher{
 		client: client,
 	}, nil
+}
+
+// Debug enables or disables debugging for the cacher.
+func (c *Cacher) Debug(val bool) {
+	c.debug = val
 }
 
 // SaveRequest is used as input to the Save operation.
@@ -77,12 +88,22 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 		return
 	}
 
+	// Check if the object already exists. If it already exists, we do not want to
+	// waste time overwriting the cache.
+	attrs, err := c.client.Bucket(bucket).Object(key).Attrs(ctx)
+	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return fmt.Errorf("failed to check if cached object exists: %w", err)
+	}
+	if attrs != nil {
+		c.log("cached object already exists, skipping")
+		return
+	}
+
 	// Create the storage writer
-	gcsw := c.client.Bucket(bucket).Object(key).NewWriter(ctx)
-	gcsw.ChunkSize = 128_000_000
-	gcsw.ObjectAttrs.ContentType = contentType
-	gcsw.ObjectAttrs.CacheControl = cacheControl
+	dne := storage.Conditions{DoesNotExist: true}
+	gcsw := c.client.Bucket(bucket).Object(key).If(dne).NewWriter(ctx)
 	defer func() {
+		c.log("closing gcs writer")
 		if cerr := gcsw.Close(); cerr != nil {
 			if retErr != nil {
 				retErr = fmt.Errorf("%v: failed to close gcs writer: %w", retErr, cerr)
@@ -92,13 +113,21 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 		}
 	}()
 
+	gcsw.ChunkSize = 128_000_000
+	gcsw.ObjectAttrs.ContentType = contentType
+	gcsw.ObjectAttrs.CacheControl = cacheControl
+	gcsw.ProgressFunc = func(soFar int64) {
+		c.log("uploaded %d bytes", soFar)
+	}
+
 	// Create the gzip writer
-	gzw, err := gzip.NewWriterLevel(gcsw, gzip.BestCompression)
+	gzw, err := gzip.NewWriterLevel(gcsw, gzip.BestSpeed)
 	if err != nil {
 		retErr = fmt.Errorf("failed to create gzip writer: %w", err)
 		return
 	}
 	defer func() {
+		c.log("closing gzip writer")
 		if cerr := gzw.Close(); cerr != nil {
 			if retErr != nil {
 				retErr = fmt.Errorf("%v: failed to close gzip writer: %w", retErr, cerr)
@@ -111,6 +140,7 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 	// Create the tar writer
 	tw := tar.NewWriter(gzw)
 	defer func() {
+		c.log("closing tar writer")
 		if cerr := tw.Close(); cerr != nil {
 			if retErr != nil {
 				retErr = fmt.Errorf("%v: failed to close tar writer: %w", retErr, cerr)
@@ -122,11 +152,14 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 
 	// Walk all files create tar
 	if err := filepath.Walk(dir, func(name string, f os.FileInfo, err error) error {
+		c.log("walking file %s", name)
+
 		if err != nil {
 			return err
 		}
 
 		if !f.Mode().IsRegular() {
+			c.log("file %s is not regular", name)
 			return nil
 		}
 
@@ -138,16 +171,19 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 		header.Name = strings.TrimPrefix(strings.Replace(name, dir, "", -1), string(filepath.Separator))
 
 		// Write header to tar
+		c.log("writing tar header for %s", name)
 		if err := tw.WriteHeader(header); err != nil {
 			return fmt.Errorf("failed to write tar header for %s: %w", f.Name(), err)
 		}
 
 		// Open and write file to tar
+		c.log("opening %s", name)
 		file, err := os.Open(name)
 		if err != nil {
 			return fmt.Errorf("failed to open: %w", err)
 		}
 
+		c.log("copying %s to tar", name)
 		if _, err := io.Copy(tw, file); err != nil {
 			if cerr := file.Close(); cerr != nil {
 				return fmt.Errorf("failed to close: %v: failed to write tar: %w", cerr, err)
@@ -156,6 +192,7 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 		}
 
 		// Close tar
+		c.log("closing %s", name)
 		if err := file.Close(); err != nil {
 			return fmt.Errorf("failed to close: %w", err)
 		}
@@ -209,22 +246,32 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 	// Get the bucket handle
 	bucketHandle := c.client.Bucket(bucket)
 
-	// Try to find one of the cached items
+	// Try to find an earlier cached item by looking for the "newest" item with
+	// one of the provided key fallbacks as a prefix.
 	var match *storage.ObjectAttrs
 	for _, key := range keys {
-		attrs, err := bucketHandle.Object(key).Attrs(ctx)
-		if err != nil {
-			if err == storage.ErrObjectNotExist {
-				continue
+		c.log("searching for objects with prefix %s", key)
+
+		it := bucketHandle.Objects(ctx, &storage.Query{
+			Prefix: key,
+		})
+
+		for {
+			attrs, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("failed to list %s: %w", key, err)
 			}
 
-			retErr = fmt.Errorf("failed to list attributes for %s: %w", key, err)
-			return
-		}
+			c.log("found object %s", key)
 
-		if match == nil || attrs.Updated.After(match.Updated) {
-			match = attrs
-			continue
+			if match == nil || attrs.Updated.After(match.Updated) {
+				c.log("setting %s as best candidate", key)
+				match = attrs
+				continue
+			}
 		}
 	}
 
@@ -235,6 +282,7 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 	}
 
 	// Ensure the output directory exists
+	c.log("making target directory %s", dir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		retErr = fmt.Errorf("failed to make target directory: %w", err)
 		return
@@ -247,6 +295,7 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 		return
 	}
 	defer func() {
+		c.log("closing gcs reader")
 		if cerr := gcsr.Close(); cerr != nil {
 			if retErr != nil {
 				retErr = fmt.Errorf("%v: failed to close gcs reader: %w", retErr, cerr)
@@ -263,6 +312,7 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 		return
 	}
 	defer func() {
+		c.log("closing gzip reader")
 		if cerr := gzr.Close(); cerr != nil {
 			if retErr != nil {
 				retErr = fmt.Errorf("%v: failed to close gzip reader: %w", retErr, cerr)
@@ -291,27 +341,35 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 			// Not entirely sure how this happens? I think it was because I uploaded a
 			// bad tarball. Nonetheless, we shall check.
 			if header == nil {
+				c.log("header is nil")
 				continue
 			}
 
 			target := filepath.Join(dir, header.Name)
+			c.log("working on %s", target)
 
 			switch header.Typeflag {
 			case tar.TypeDir:
+				c.log("creating directory %s", target)
+
 				if err := os.MkdirAll(target, 0755); err != nil {
 					return fmt.Errorf("failed to make directory: %w", err)
 				}
 			case tar.TypeReg:
+				c.log("creating file %s", target)
+
 				// Create the parent directory in case it does not exist...
 				if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 					return fmt.Errorf("failed to make parent directory: %w", err)
 				}
 
+				c.log("opening %s", target)
 				f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
 				if err != nil {
 					return fmt.Errorf("failed to open: %w", err)
 				}
 
+				c.log("copying %s to disk", target)
 				if _, err := io.Copy(f, tr); err != nil {
 					if cerr := f.Close(); cerr != nil {
 						return fmt.Errorf("failed to close: %v: failed to untar: %w", cerr, err)
@@ -320,6 +378,7 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 				}
 
 				// Close f here instead of deferring
+				c.log("closing %s", target)
 				if err := f.Close(); err != nil {
 					return fmt.Errorf("failed to close: %w", err)
 				}
@@ -336,39 +395,72 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 }
 
 // HashGlob hashes the files matched by the given glob.
-func HashGlob(pattern string) (string, error) {
+func (c *Cacher) HashGlob(pattern string) (string, error) {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return "", fmt.Errorf("failed to glob: %w", err)
 	}
-	return HashFiles(matches)
+	return c.HashFiles(matches)
 }
 
 // HashFiles hashes the list of file and returns the hex-encoded SHA256.
-func HashFiles(files []string) (string, error) {
+func (c *Cacher) HashFiles(files []string) (string, error) {
 	h, err := blake2b.New(16, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create hash: %w", err)
 	}
 
-	for _, name := range files {
+	hashOne := func(name string, h hash.Hash) (retErr error) {
+		c.log("opening %s", name)
 		f, err := os.Open(name)
 		if err != nil {
 			if cerr := f.Close(); cerr != nil {
-				return "", fmt.Errorf("failed to close: %v: failed to open file: %w", cerr, err)
+				return fmt.Errorf("failed to close: %v: failed to open file: %w", cerr, err)
 			}
-			return "", fmt.Errorf("failed to open file: %w", err)
+			return fmt.Errorf("failed to open file: %w", err)
+		}
+		defer func() {
+			c.log("closing %s", name)
+			if cerr := f.Close(); cerr != nil {
+				if retErr != nil {
+					retErr = fmt.Errorf("%v: failed to close file: %w", retErr, cerr)
+					return
+				}
+				retErr = fmt.Errorf("failed to close file: %w", cerr)
+			}
+		}()
+
+		c.log("stating %s", name)
+		stat, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat file: %w", err)
 		}
 
+		if stat.IsDir() {
+			c.log("skipping %s (is a directory)", name)
+			return nil
+		}
+
+		c.log("hashing %s", name)
 		if _, err := io.Copy(h, f); err != nil {
-			return "", fmt.Errorf("failed to hash: %w", err)
+			return fmt.Errorf("failed to hash: %w", err)
 		}
 
-		if err := f.Close(); err != nil {
-			return "", fmt.Errorf("failed to close: %w", err)
+		return nil
+	}
+
+	for _, name := range files {
+		if err := hashOne(name, h); err != nil {
+			return "", fmt.Errorf("failed to hash %s: %w", name, err)
 		}
 	}
 
 	dig := h.Sum(nil)
 	return fmt.Sprintf("%x", dig), nil
+}
+
+func (c *Cacher) log(msg string, vars ...interface{}) {
+	if c.debug {
+		log.Printf(msg, vars...)
+	}
 }

@@ -67,6 +67,9 @@ gcs-cacher \
 
 This will maximize cache hits.
 
+**It is strongly recommended that you enable a lifecycle rule on your cache
+bucket!** This will automatically purge stale entires and keep costs lower.
+
 
 [gcs]: https://cloud.google.com/storage
 [gcb]: https://cloud.google.com/cloud-build
