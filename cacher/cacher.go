@@ -121,11 +121,7 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 	}
 
 	// Create the gzip writer
-	gzw, err := gzip.NewWriterLevel(gcsw, gzip.BestSpeed)
-	if err != nil {
-		retErr = fmt.Errorf("failed to create gzip writer: %w", err)
-		return
-	}
+	gzw := gzip.NewWriter(gcsw)
 	defer func() {
 		c.log("closing gzip writer")
 		if cerr := gzw.Close(); cerr != nil {
