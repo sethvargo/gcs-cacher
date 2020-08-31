@@ -71,6 +71,40 @@ This will maximize cache hits.
 bucket!** This will automatically purge stale entires and keep costs lower.
 
 
+## Why?
+
+The primary use case is to cache large and/or expensive dependency trees like a
+Ruby vendor directory or a Go module cache as part of a CI/CD step. Downloading
+a compressed, packaged archive is often much faster than a full dependency
+resolution. It has an unintended benefit of also reducing dependencies on
+external build systems.
+
+**Why not just use gsutil?**<br>
+That's a great question. In fact, there's already a [cloud builder][builder]
+that uses `gsutil` to accomplish similar things. However, that approach has a
+few drawbacks:
+
+1.  It doesn't work with large files because containers don't package the crc
+    package. If you're cache is > 500mb it will fail. GCS Cacher does not have
+    this same limitation.
+
+1.  You have to build, publish, and manage the container to your own project. We
+    publish pre-compiled binaries and Docker containers from multiple
+    registries. You're still free to build it yourself, but you don't have to.
+
+1.  The container image itself is **huge**. It's nearly 1GB in size. The
+    gcs-cacher container is just a few MBs. Since we're optimzing for build
+    speed, container size is important.
+
+1.  It's actually really hard to get the fallback key logic correct in bash.
+    There are some subtle edge cases (like when your filename contains a `$`)
+    where this approach completely fails.
+
+1.  Despite supporting parallel uploads, that cacher is still ~3.2x slower than
+    GCS Cacher.
+
+
 [gcs]: https://cloud.google.com/storage
 [gcb]: https://cloud.google.com/cloud-build
 [releases]: releases
+[builder]: https://github.com/GoogleCloudPlatform/cloud-builders-community/tree/master/cache
