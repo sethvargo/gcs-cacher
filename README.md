@@ -10,6 +10,10 @@ GCS Cacher is a small CLI and Docker container that saves and restores caches on
 
 ## Usage
 
+1.  [Create a new Cloud Storage bucket][create-bucket]. Alternatively, you can
+    use an existing Cloud Storage bucket. To automatically clean up the cache
+    after a certain period of time, set a [lifecycle policy][lifecycle-policy].
+
 1.  Create a cache:
 
     ```shell
@@ -108,3 +112,5 @@ few drawbacks:
 [gcb]: https://cloud.google.com/cloud-build
 [releases]: releases
 [builder]: https://github.com/GoogleCloudPlatform/cloud-builders-community/tree/master/cache
+[create-bucket]: https://cloud.google.com/storage/docs/creating-buckets
+[lifecycle-policy]: https://cloud.google.com/storage/docs/lifecycle#delete
