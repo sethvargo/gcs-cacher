@@ -59,7 +59,7 @@ func main() {
 	done()
 
 	if err != nil {
-		fmt.Fprintf(stderr, "%s\n\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 		if !allowFailure {
 			os.Exit(1)
 		}
@@ -160,6 +160,7 @@ func (s *stringSliceFlag) String() string {
 	}
 	return strings.Join(*s, ",")
 }
+
 func (s *stringSliceFlag) Set(value string) error {
 	var vals []string
 	for _, val := range strings.Split(value, ",") {

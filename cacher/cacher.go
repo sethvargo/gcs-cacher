@@ -92,7 +92,8 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 	// waste time overwriting the cache.
 	attrs, err := c.client.Bucket(bucket).Object(key).Attrs(ctx)
 	if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
-		return fmt.Errorf("failed to check if cached object exists: %w", err)
+		retErr = fmt.Errorf("failed to check if cached object exists: %w", err)
+		return
 	}
 	if attrs != nil {
 		c.log("cached object already exists, skipping")
@@ -117,7 +118,7 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 	gcsw.ObjectAttrs.ContentType = contentType
 	gcsw.ObjectAttrs.CacheControl = cacheControl
 	gcsw.ProgressFunc = func(soFar int64) {
-		fmt.Printf("uploaded %d bytes", soFar)
+		fmt.Printf("uploaded %d bytes\n", soFar)
 	}
 
 	// Create the gzip writer
@@ -258,7 +259,8 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 				break
 			}
 			if err != nil {
-				return fmt.Errorf("failed to list %s: %w", key, err)
+				retErr = fmt.Errorf("failed to list %s: %w", key, err)
+				return
 			}
 
 			c.log("found object %s", key)
@@ -410,10 +412,8 @@ func (c *Cacher) HashFiles(files []string) (string, error) {
 		c.log("opening %s", name)
 		f, err := os.Open(name)
 		if err != nil {
-			if cerr := f.Close(); cerr != nil {
-				return fmt.Errorf("failed to close: %v: failed to open file: %w", cerr, err)
-			}
-			return fmt.Errorf("failed to open file: %w", err)
+			retErr = fmt.Errorf("failed to open file: %w", err)
+			return
 		}
 		defer func() {
 			c.log("closing %s", name)
@@ -429,20 +429,22 @@ func (c *Cacher) HashFiles(files []string) (string, error) {
 		c.log("stating %s", name)
 		stat, err := f.Stat()
 		if err != nil {
-			return fmt.Errorf("failed to stat file: %w", err)
+			retErr = fmt.Errorf("failed to stat file: %w", err)
+			return
 		}
 
 		if stat.IsDir() {
 			c.log("skipping %s (is a directory)", name)
-			return nil
+			return
 		}
 
 		c.log("hashing %s", name)
 		if _, err := io.Copy(h, f); err != nil {
-			return fmt.Errorf("failed to hash: %w", err)
+			retErr = fmt.Errorf("failed to hash: %w", err)
+			return
 		}
 
-		return nil
+		return
 	}
 
 	for _, name := range files {
