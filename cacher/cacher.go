@@ -177,15 +177,15 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 		c.log("opening %s", name)
 		file, err := os.Open(name)
 		if err != nil {
-			return fmt.Errorf("failed to open: %w", err)
+			return fmt.Errorf("failed to open %s: %w", f.Name(), err)
 		}
 
 		c.log("copying %s to tar", name)
 		if _, err := io.Copy(tw, file); err != nil {
 			if cerr := file.Close(); cerr != nil {
-				return fmt.Errorf("failed to close: %v: failed to write tar: %w", cerr, err)
+				return fmt.Errorf("failed to close %s: %v: failed to write tar: %w", f.Name(), cerr, err)
 			}
-			return fmt.Errorf("failed to write tar: %w", err)
+			return fmt.Errorf("failed to write tar for %s: %w", f.Name(), err)
 		}
 
 		// Close tar
@@ -351,34 +351,35 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 				c.log("creating directory %s", target)
 
 				if err := os.MkdirAll(target, 0755); err != nil {
-					return fmt.Errorf("failed to make directory: %w", err)
+					return fmt.Errorf("failed to make directory %s: %w", target, err)
 				}
 			case tar.TypeReg:
 				c.log("creating file %s", target)
 
 				// Create the parent directory in case it does not exist...
-				if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-					return fmt.Errorf("failed to make parent directory: %w", err)
+				parent := filepath.Dir(target)
+				if err := os.MkdirAll(parent, 0755); err != nil {
+					return fmt.Errorf("failed to make parent directory %s: %w", parent, err)
 				}
 
 				c.log("opening %s", target)
 				f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
 				if err != nil {
-					return fmt.Errorf("failed to open: %w", err)
+					return fmt.Errorf("failed to open %s: %w", target, err)
 				}
 
 				c.log("copying %s to disk", target)
 				if _, err := io.Copy(f, tr); err != nil {
 					if cerr := f.Close(); cerr != nil {
-						return fmt.Errorf("failed to close: %v: failed to untar: %w", cerr, err)
+						return fmt.Errorf("failed to close %s: %v: failed to untar: %w", target, cerr, err)
 					}
-					return fmt.Errorf("failed to untar: %w", err)
+					return fmt.Errorf("failed to untar %s: %w", target, err)
 				}
 
 				// Close f here instead of deferring
 				c.log("closing %s", target)
 				if err := f.Close(); err != nil {
-					return fmt.Errorf("failed to close: %w", err)
+					return fmt.Errorf("failed to close %s: %w", target, err)
 				}
 			default:
 				return fmt.Errorf("unknown header type %v for %s", header.Typeflag, target)
