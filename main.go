@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sethvargo/gcs-cacher/cacher"
 	"github.com/sethvargo/go-signalcontext"
+	"google.golang.org/api/googleapi"
 )
 
 var (
@@ -60,6 +62,13 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
+
+		// Check if the error is a Google API error and print extra information.
+		var gerr *googleapi.Error
+		if errors.As(err, &gerr) {
+			fmt.Fprintf(stderr, "Error is a googleapi error:\n%s\n", err.Error())
+		}
+
 		if !allowFailure {
 			os.Exit(1)
 		}
