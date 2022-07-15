@@ -9,28 +9,31 @@ on:
   pull_request:
     branches:
     - main
+  workflow_dispatch:
 
 jobs:
   unit:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
-    - uses: actions/setup-go@v2
+    - uses: actions/setup-go@v3
       with:
-        go-version: '1.14'
+        go-version: '1.18'
 
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
 
-    - name: Lint
-      run: make fmtcheck staticcheck spellcheck
-      if: ${{ runner.os != 'Windows' }}
-
     - name: Test
-      run: make test
+      run: |-
+        go test \
+          -count=1 \
+          -race \
+          -timeout=10m \
+          -shuffle=on \
+          ./...
