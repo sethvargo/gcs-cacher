@@ -396,6 +396,12 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 				if err := f.Close(); err != nil {
 					return fmt.Errorf("failed to close %s: %w", target, err)
 				}
+			case tar.TypeSymlink:
+				c.log("creating symlink %s", target)
+
+				if err := os.Symlink(header.Linkname, target); err != nil {
+					return fmt.Errorf("failed to create symlink %s: %w", target, err)
+				}
 			default:
 				return fmt.Errorf("unknown header type %v for %s", header.Typeflag, target)
 			}
