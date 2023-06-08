@@ -338,6 +338,9 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 	// Create the tar reader
 	tr := tar.NewReader(gzr)
 
+	// Collect symlink information
+	var symlinkTargets map[string]string
+
 	// Unzip and untar each file into the target directory
 	if err := func() error {
 		for {
@@ -347,7 +350,6 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 					// No more files
 					return nil
 				}
-
 				return fmt.Errorf("failed to read header: %w", err)
 			}
 
@@ -365,7 +367,7 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 			case tar.TypeDir:
 				c.log("creating directory %s", target)
 
-				if err := os.MkdirAll(target, 0755); err != nil {
+				if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
 					return fmt.Errorf("failed to make directory %s: %w", target, err)
 				}
 			case tar.TypeReg:
@@ -383,7 +385,6 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 					return fmt.Errorf("failed to open %s: %w", target, err)
 				}
 
-				c.log("copying %s to disk", target)
 				if _, err := io.Copy(f, tr); err != nil {
 					if cerr := f.Close(); cerr != nil {
 						return fmt.Errorf("failed to close %s: %v: failed to untar: %w", target, cerr, err)
@@ -391,24 +392,48 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 					return fmt.Errorf("failed to untar %s: %w", target, err)
 				}
 
-				// Close f here instead of deferring
 				c.log("closing %s", target)
 				if err := f.Close(); err != nil {
 					return fmt.Errorf("failed to close %s: %w", target, err)
 				}
 			case tar.TypeSymlink:
-				c.log("creating symlink %s", target)
+				c.log("collecting symlink target for %s", target)
 
-				if err := os.Symlink(header.Linkname, target); err != nil {
-					return fmt.Errorf("failed to create symlink %s: %w", target, err)
+				// Resolve the relative path of the symlink target
+				linkPath := filepath.Join(filepath.Dir(target), header.Linkname)
+
+				// Store the symlink target information
+				if symlinkTargets == nil {
+					symlinkTargets = make(map[string]string)
 				}
+				symlinkTargets[target] = linkPath
 			default:
 				return fmt.Errorf("unknown header type %v for %s", header.Typeflag, target)
 			}
 		}
 	}(); err != nil {
-		retErr = fmt.Errorf("failed to download file: %w", err)
+		retErr = fmt.Errorf("failed to untar file: %w", err)
 		return
+	}
+
+	// Create symlinks after creating all the normal files
+	if symlinkTargets != nil {
+		for target, linkPath := range symlinkTargets {
+			c.log("creating symlink %s -> %s", target, linkPath)
+
+			// Check if the target file or directory exists
+			if _, err := os.Stat(linkPath); err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("skipping symlink %s -> %s (target does not exist)", target, linkPath)
+				}
+				return fmt.Errorf("failed to access symlink target %s: %w", linkPath, err)
+			}
+
+			// Create the symlink
+			if err := os.Symlink(linkPath, target); err != nil {
+				return fmt.Errorf("failed to create symlink %s -> %s: %w", target, linkPath, err)
+			}
+		}
 	}
 
 	return
