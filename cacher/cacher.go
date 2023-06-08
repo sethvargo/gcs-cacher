@@ -155,6 +155,26 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 			return err
 		}
 
+		// Resolve symlink if encountered
+		if f.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(name)
+			if err != nil {
+				return fmt.Errorf("failed to read symlink %s: %w", name, err)
+			}
+			linkPath := filepath.Join(filepath.Dir(name), link)
+			linkInfo, err := os.Lstat(linkPath)
+			if err != nil {
+				return fmt.Errorf("failed to retrieve symlink target %s: %w", linkPath, err)
+			}
+			f = linkInfo
+			name = linkPath
+		}
+
+		if f.Mode().IsDir() {
+			c.log("file %s is a dir", name)
+			return nil
+		}
+
 		// Create the tar header
 		header, err := tar.FileInfoHeader(f, f.Name())
 		if err != nil {
