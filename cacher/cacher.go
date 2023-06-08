@@ -155,11 +155,6 @@ func (c *Cacher) Save(ctx context.Context, i *SaveRequest) (retErr error) {
 			return err
 		}
 
-		if !f.Mode().IsRegular() {
-			c.log("file %s is not regular", name)
-			return nil
-		}
-
 		// Create the tar header
 		header, err := tar.FileInfoHeader(f, f.Name())
 		if err != nil {
