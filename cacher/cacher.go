@@ -399,14 +399,11 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 			case tar.TypeSymlink:
 				c.log("collecting symlink target for %s", target)
 
-				// Resolve the relative path of the symlink target
-				linkPath := filepath.Join(filepath.Dir(target), header.Linkname)
-
 				// Store the symlink target information
 				if symlinkTargets == nil {
 					symlinkTargets = make(map[string]string)
 				}
-				symlinkTargets[target] = linkPath
+				symlinkTargets[target] = header.Linkname
 			default:
 				return fmt.Errorf("unknown header type %v for %s", header.Typeflag, target)
 			}
@@ -421,12 +418,10 @@ func (c *Cacher) Restore(ctx context.Context, i *RestoreRequest) (retErr error) 
 		for target, linkPath := range symlinkTargets {
 			c.log("creating symlink %s -> %s", target, linkPath)
 
-			// Check if the target file or directory exists
-			if _, err := os.Stat(linkPath); err != nil {
-				if os.IsNotExist(err) {
-					return fmt.Errorf("skipping symlink %s -> %s (target does not exist)", target, linkPath)
-				}
-				return fmt.Errorf("failed to access symlink target %s: %w", linkPath, err)
+			// Ensure the parent directory of the symlink exists
+			parentDir := filepath.Dir(target)
+			if err := os.MkdirAll(parentDir, 0755); err != nil {
+				return fmt.Errorf("failed to create parent directory for symlink %s: %w", target, err)
 			}
 
 			// Create the symlink
