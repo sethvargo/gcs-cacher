@@ -5,7 +5,7 @@ go 1.18
 require (
 	cloud.google.com/go/storage v1.29.0
 	github.com/sethvargo/go-signalcontext v0.2.1
-	golang.org/x/crypto v0.31.0
+	golang.org/x/crypto v0.35.0
 	google.golang.org/api v0.114.0
 )
 
@@ -21,10 +21,10 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.2.3 // indirect
 	github.com/googleapis/gax-go/v2 v2.7.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/net v0.21.0 // indirect
+	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/oauth2 v0.7.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
